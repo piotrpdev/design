@@ -33,7 +33,7 @@ For a 1.0 release, Kroxylicious needs a stable public API surface that the proje
 
 Every type that appears in Kroxylicious's public API should live in a Kroxylicious namespace. This means a single breaking change for filter developers - one import migration - rather than a drip of repeated breakage as Kafka reorganises its internals.
 
-"Own the surface" does not mean "rewrite everything from scratch." The shaded and generated artifacts redistribute `kafka-clients` bytecode under the same Apache 2.0 licence. The original Apache Software Foundation copyright notices are preserved in the bytecode. The underlying implementations can be replaced with Kroxylicious-native ones incrementally, gated by the verification harness proving each replacement is correct.
+"Own the surface" does not mean "rewrite everything from scratch." The shaded and generated artifacts redistribute `kafka-clients` bytecode under the same Apache 2.0 licence. The original Apache Software Foundation copyright notices are preserved. The underlying implementations can be replaced with Kroxylicious-native ones incrementally, gated by the verification harness proving each replacement is correct.
 
 ### Approach: shade `kafka-clients` via a dedicated repo
 
