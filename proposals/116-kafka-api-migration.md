@@ -21,7 +21,7 @@ The `kroxylicious-krpc-plugin` already parses the JSON IDL specs independently u
 
 ## Motivation
 
-Kafka 4.3.0 moved 37 classes from `org.apache.kafka.common.record.*` to `org.apache.kafka.common.record.internal.*` ([KAFKA-20128](https://issues.apache.org/jira/browse/KAFKA-20128)). Upgrading Kroxylicious to 4.3.0 required import changes across 80 Java files in 9 modules. This is a symptom of a deeper problem: Kroxylicious depends on Kafka internal APIs that Kafka is free to move or remove at any time.
+Kafka 4.3.0 moved 37 classes from `org.apache.kafka.common.record.*` to `org.apache.kafka.common.record.internal.*` ([KAFKA-20128](https://issues.apache.org/jira/browse/KAFKA-20128)). Upgrading Kroxylicious to 4.3.0 required import changes across 80 Java files in 9 modules. This is a symptom of a deeper problem: Kroxylicious depends on Kafka internal APIs that Kafka is free to change, move or remove at any time.
 
 Kafka does not consider these packages to be stable public API. The project has no obligation to maintain backward compatibility, and further reorganisations are likely. Each one forces a breaking change on every Kroxylicious filter developer - internal and external.
 
