@@ -23,7 +23,7 @@ The `kroxylicious-krpc-plugin` already parses the JSON IDL specs independently u
 
 Kafka 4.3.0 moved 37 classes from `org.apache.kafka.common.record.*` to `org.apache.kafka.common.record.internal.*` ([KAFKA-20128](https://issues.apache.org/jira/browse/KAFKA-20128)). Upgrading Kroxylicious to 4.3.0 required import changes across 80 Java files in 9 modules. This is a symptom of a deeper problem: Kroxylicious depends on Kafka internal APIs that Kafka is free to change, move or remove at any time.
 
-Kafka does not consider these packages to be stable public API. The project has no obligation to maintain backward compatibility, and further reorganisations are likely. Each one forces a breaking change on every Kroxylicious filter developer - internal and external.
+Kafka does not consider these packages to be stable public APIs. The project has no obligation to maintain backward compatibility, and further reorganisations are likely. Because these unstable Kafka classes are exposed through our public API, we cannot simply absorb these changes beneath our abstraction layer. Instead, every upstream reorganization forces a breaking change directly onto **Filter Authors** who rely on the Filter API to implement their own custom business logic.
 
 For a 1.0 release, Kroxylicious needs a stable public API surface that the project controls. The Kafka protocol wire format itself is stable (governed by KIPs), but the Java classes representing that format are not.
 
