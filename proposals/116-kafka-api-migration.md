@@ -37,7 +37,7 @@ Every type that appears in Kroxylicious's public API should live in a Kroxylicio
 
 ### Approach: shade `kafka-clients` via a dedicated repo
 
-The Maven Shade Plugin takes compiled classes from `kafka-clients` and republishes them under a Kroxylicious namespace. All cross-references between relocated classes are rewritten automatically at the bytecode level. This means Kafka package reorganisations - including moves to an `internal` subpackage like KAFKA-20128 - are completely invisible.
+The Maven Shade Plugin takes compiled classes from `kafka-clients` and republishes them under a Kroxylicious namespace. All cross-references between relocated classes are rewritten automatically at the bytecode level. This means Kafka package reorganisations - including moves to an `internal` subpackage like KAFKA-20128 - are completely invisible. Breaking code changes such as method renames or signature changes are addressed by adding patches that overload the methods or wrap them appropriately.
 
 A dedicated repo in the Kroxylicious GitHub org (`kroxylicious/kafka-patches`) stores the shading configuration and any generator patches needed for future enhancements. When generator enhancements are implemented, CI will apply the patches against the Kafka generator source, run the patched generator to produce enhanced `*Data` source, compile, and shade the result alongside the rest of `kafka-clients`.
 
