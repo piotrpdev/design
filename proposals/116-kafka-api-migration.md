@@ -43,7 +43,7 @@ A dedicated repo in the Kroxylicious GitHub org (`kroxylicious/kafka-patches`) s
 
 Published artifact versions use the Kafka version as a base with a qualifier suffix (e.g. `4.3.0-kroxy-0`, `4.3.0-kroxy-1` for Kroxylicious-only fixes, `4.4.0-kroxy-0` when bumping to a new Kafka release). This makes the Kafka baseline immediately visible in any dependency declaration.
 
-The `kroxylicious-krpc-plugin` currently depends on `kafka-clients` solely for `ApiKeys`. After this change it depends on the new artifact instead. Its role in generating filter interfaces, invokers, and decoders is otherwise unchanged.
+The `kroxylicious-krpc-plugin` currently depends on `kafka-clients` solely for `ApiKeys`. After this change it depends on the new artifact instead (or we could codegen an `ApiKeys` from the RPC definitions themselves). Its role in generating filter interfaces, invokers, and decoders is otherwise unchanged.
 
 ### Shading configuration
 
