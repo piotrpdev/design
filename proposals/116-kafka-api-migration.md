@@ -33,32 +33,28 @@ For a 1.0 release, Kroxylicious needs a stable public API surface that the proje
 
 Every type that appears in Kroxylicious's public API should live in a Kroxylicious namespace. This means a single breaking change for filter developers - one import migration - rather than a drip of repeated breakage as Kafka reorganises its internals.
 
-"Own the surface" does not mean "rewrite everything from scratch." The shaded and generated artifacts redistribute `kafka-clients` bytecode under the same Apache 2.0 licence. The original Apache Software Foundation copyright notices are preserved. The underlying implementations can be replaced with Kroxylicious-native ones incrementally, gated by the verification harness proving each replacement is correct.
+"Own the surface" does not mean "rewrite everything from scratch." The copied source files retain their original Apache Software Foundation copyright headers - the ASF remains the author of the underlying code, and these files are redistributed under the same Apache 2.0 licence. The underlying implementations can be replaced with Kroxylicious-native ones incrementally, gated by the verification harness proving each replacement is correct.
 
-### Approach: shade `kafka-clients` via a dedicated repo
+### Approach: own the source from the start
 
-The Maven Shade Plugin takes compiled classes from `kafka-clients` and republishes them under a Kroxylicious namespace. All cross-references between relocated classes are rewritten automatically at the bytecode level. This means Kafka package reorganisations - including moves to an `internal` subpackage like KAFKA-20128 - are completely invisible. Breaking code changes such as method renames or signature changes are addressed by adding patches that overload the methods or wrap them appropriately.
+Kafka's `MessageGenerator` (~35 files in `generator/src/main/java/org/apache/kafka/message/`) is copied into the Kroxylicious repo as a new module. It is invoked during the build against the upstream JSON IDL spec files (bundled inside `kafka-clients`) to produce `*Data` source files under the Kroxylicious namespace (`io.kroxylicious.kafka.*`). The non-generated classes - protocol infrastructure, record classes, and scattered `common.*` types - are similarly copied into the Kroxylicious repo as source under the same namespace, retaining their original Apache Software Foundation copyright headers.
 
-A dedicated repo in the Kroxylicious GitHub org (`kroxylicious/kafka-patches`) stores the shading configuration and any generator patches needed for future enhancements. When generator enhancements are implemented, CI will apply the patches against the Kafka generator source, run the patched generator to produce enhanced `*Data` source, compile, and shade the result alongside the rest of `kafka-clients`.
-
-Published artifact versions use the Kafka version as a base with a qualifier suffix (e.g. `4.3.0-kroxy-0`, `4.3.0-kroxy-1` for Kroxylicious-only fixes, `4.4.0-kroxy-0` when bumping to a new Kafka release). This makes the Kafka baseline immediately visible in any dependency declaration.
+This gives full source ownership from day one. Every upstream change is a deliberate choice - review it, absorb it, or skip it. Generator enhancements (type-safe request-response pairing, Javadoc from IDL, `aliases`) are first-class commits to the in-repo generator, not patches layered on top. And when the time comes to replace buffer/record classes with Netty-native implementations, there is no bytecode transformation to unwind - we already own the source.
 
 The `kroxylicious-krpc-plugin` currently depends on `kafka-clients` solely for `ApiKeys`. After this change it depends on the new artifact instead (or we could codegen an `ApiKeys` from the RPC definitions themselves). Its role in generating filter interfaces, invokers, and decoders is otherwise unchanged.
 
-### Shading configuration
+### What gets copied and generated
 
-The shading configuration in `kroxylicious/kafka-patches` uses a single broad relocation rule:
+| Component                                  | Source                                    | Approach                                               |
+|--------------------------------------------|-------------------------------------------|--------------------------------------------------------|
+| `MessageGenerator` + friends (~35 files)   | `kafka/generator/src/`                    | Copied into Kroxylicious repo as a new module          |
+| `*Data` classes (~198)                     | IDL specs + copied `MessageGenerator`     | Generated during build under `io.kroxylicious.kafka.*` |
+| Protocol infrastructure (~16 classes)      | `kafka-clients` `common.protocol.*`       | Copied as source under `io.kroxylicious.kafka.*`       |
+| Record classes (~35 classes)               | `kafka-clients` `common.record.*`         | Copied as source under `io.kroxylicious.kafka.*`       |
+| `ApiKeys`                                  | `kafka-clients` `common.protocol.ApiKeys` | Generated from IDL specs, or copied as source          |
+| `Uuid`, `UnsupportedVersionException`, etc.| `kafka-clients` `common.*`               | Copied as source under `io.kroxylicious.kafka.*`       |
 
-- **Include:** `org.apache.kafka:kafka-clients`
-- **Relocate:** `org.apache.kafka` → `io.kroxylicious.kafka`
-
-Everything in `kafka-clients` is relocated in one rule - `*Data` classes, protocol infrastructure, record classes, OAuth/SASL classes, `requests.*`, and anything Kafka adds in future releases. No per-package enumeration is needed.
-
-When Kafka relocates a class in a future release - as it did with `MemoryRecords` in KAFKA-20128 - an additional targeted rule is added to map the new upstream path back to its stable Kroxylicious location. For example:
-
-- **Stability rule:** `org.apache.kafka.common.record.internal.MemoryRecords` → `io.kroxylicious.kafka.common.record.MemoryRecords`
-
-Filter developers who import `io.kroxylicious.kafka.common.record.MemoryRecords` see no change at all. This is the key advantage over a direct `kafka-clients` dependency: Kafka can freely reorganise its internal package structure and the Kroxylicious namespace remains stable. These stability rules accumulate in `kroxylicious/kafka-patches` over time and serve as a permanent, inspectable record of every upstream reorganisation that would otherwise have been a breaking change.
+`ByteBufAccessor` is Kroxylicious-owned and is updated separately: it is changed to implement the new `Readable`/`Writable` interfaces from the Kroxylicious namespace rather than Kafka's.
 
 ### Verification strategy
 
@@ -68,13 +64,13 @@ The verification harness is a prerequisite, not a follow-up. Correctness must be
 
 For every spec and every supported protocol version: serialise a message with our generated classes, deserialise with Kafka's, and assert byte-level equality - then reverse the direction. This is the ground truth. If bytes we produce are consumed correctly by Kafka's classes and vice versa, we are wire-compatible.
 
-Exploratory work on the [`piotrpdev/kroxylicious#refactor/generate-data-class`](https://github.com/piotrpdev/kroxylicious/tree/refactor/generate-data-class) branch built a prototype of this infrastructure covering all 198 specs: parameterised fidelity tests at every valid version, randomised field-value tests (including explicit coverage of `null` for nullable fields), jqwik property-based tests for full-depth message instances, and a compile-time spec count guard. That prototype was designed around the FreeMarker template approach (see ["Rejected Alternatives"](#rejected-alternatives)), where generated classes were compiled at test time via `ToolProvider.getSystemJavaCompiler()` and loaded via `URLClassLoader`. With the shading approach the classes are already on the classpath at build time, so only the class-loading mechanism changes - the verification logic itself carries over unchanged.
+Exploratory work on the [`piotrpdev/kroxylicious#refactor/generate-data-class`](https://github.com/piotrpdev/kroxylicious/tree/refactor/generate-data-class) branch built a prototype of this infrastructure covering all 198 specs: parameterised fidelity tests at every valid version, randomised field-value tests (including explicit coverage of `null` for nullable fields), jqwik property-based tests for full-depth message instances, and a compile-time spec count guard. That prototype was designed around the FreeMarker template approach (see ["Rejected Alternatives"](#rejected-alternatives)), where generated classes were compiled at test time via `ToolProvider.getSystemJavaCompiler()` and loaded via `URLClassLoader`. With the source-ownership approach the classes are already on the classpath at build time, so only the class-loading mechanism changes - the verification logic itself carries over unchanged.
 
-These tests live in `kroxylicious/kafka-patches` alongside the shading configuration, with `kafka-clients` as a test-scoped dependency. They run as part of that repo's CI pipeline - when `kafka-clients` is bumped, they immediately report any incompatibility before a new artifact is published.
+These tests live in the Kroxylicious repo alongside the generated and copied classes, with `kafka-clients` as a test-scoped dependency. They run as part of the normal CI pipeline - when `kafka-clients` is bumped, they immediately report any incompatibility.
 
 #### Spec drift detection
 
-When `kafka-clients` is bumped in `kroxylicious/kafka-patches`, the shaded artifact is rebuilt from the new jar. Any changes to the JSON IDL spec files are reflected in the shaded `*Data` classes automatically. The `EXPECTED_SPEC_COUNT` constant in the fidelity tests provides an additional guard: if the new `kafka-clients` version adds or removes spec files, the build fails until the constant is updated, forcing an explicit review of what changed.
+When `kafka-clients` is bumped, the generator re-reads the JSON IDL spec files from the new jar and regenerates the `*Data` classes. Any changes to the specs are reflected in the generated output automatically. The `EXPECTED_SPEC_COUNT` constant in the fidelity tests provides an additional guard: if the new `kafka-clients` version adds or removes spec files, the build fails until the constant is updated, forcing an explicit review of what changed.
 
 Not all spec changes are equal. Reviewers should evaluate by risk:
 
@@ -87,24 +83,21 @@ Not all spec changes are equal. Reviewers should evaluate by risk:
 | New `validVersions` max           | Low        | Just more versions to test                  |
 | New field with `ignorable: true`  | Low        | Safe at all versions                        |
 
-**Proactive early warning:** A scheduled GitHub Actions workflow (e.g. weekly) that detects new Kafka releases and opens a PR in `kroxylicious/kafka-patches` bumping the `kafka-clients` version automatically:
+#### Proactive early warning
 
-1. Queries Maven Central's search API for the latest release of `org.apache.kafka:kafka-clients`.
-2. Compares the result against the current `kafka-clients` version in `kroxylicious/kafka-patches`.
-3. If a newer version exists and no open PR already targets it, opens a PR bumping the version.
-4. CI runs on the PR - rebuilding the shaded artifact and running the fidelity tests against the new `kafka-clients`.
+Dependabot opens a PR bumping `kafka-clients` to a new version on release automatically. CI runs on the PR - regenerating `*Data` classes and running the fidelity tests and `japicmp` comparison against the new `kafka-clients` (see section below for details on tests).
 
 If CI passes, the PR can be reviewed and merged with minimal effort. If CI fails, the PR surfaces exactly what broke - a fidelity test failure identifies a wire incompatibility; an `EXPECTED_SPEC_COUNT` failure flags a spec change requiring review. Either way, the problem is visible and actionable immediately, before anyone has to manually discover the new release.
 
-#### Drift in shaded classes
+#### Drift in source-copied classes
 
-With shading, upstream changes to hand-coded classes like `MemoryRecords` and `RecordBatch` are absorbed automatically when `kafka-clients` is bumped. Drift is detected through two complementary mechanisms:
+The non-generated classes (`MemoryRecords`, `RecordBatch`, protocol infrastructure, etc.) are copied source that may diverge from upstream over time as Kafka evolves. Drift is detected through two complementary mechanisms:
 
-1. **Wire-level fidelity tests:** Any change to serialisation behaviour surfaces as a test failure. These tests serialise with our shaded classes and deserialise with the original `kafka-clients` classes (and vice versa), so any divergence in the binary format is caught immediately.
+1. **`japicmp` API comparison:** `japicmp-maven-plugin` compares by fully-qualified class name, so we cannot point it directly at our jar and `kafka-clients` - the package names do not match. Instead, we shade `kafka-clients` with the same `org.apache.kafka` → `io.kroxylicious.kafka` relocation into a throwaway reference artifact, then run `japicmp` comparing our source-built jar against that reference. Both jars now have matching package names, and `japicmp` reports exactly which APIs have diverged from upstream - method renames, signature changes, removed types. Kroxylicious already uses `japicmp` in the main build, so the plugin infrastructure is in place.
 
-2. **Release notes review:** The risk case is a behavioural change that does not affect the wire format - for example, a change to validation logic or error handling in `MemoryRecords`. This cannot be caught by tests alone and requires reviewing the `kafka-clients` changelog when bumping the version, which is part of the standard upgrade process.
+2. **Wire-level fidelity tests:** Any change to serialisation behaviour surfaces as a test failure. These tests serialise with our classes and deserialise with the original `kafka-clients` classes (and vice versa), so any divergence in the binary format is caught immediately.
 
-The randomised fidelity tests partially mitigate the second risk by exercising non-default field values, but changelog review remains essential.
+Together, `japicmp` catches API-level divergence and the fidelity tests catch wire-format divergence. Non-wire behavioural changes - validation logic, error handling - require reviewing the `kafka-clients` changelog when bumping the version, which is part of the standard upgrade process.
 
 ### Enhancements to the generator
 
@@ -142,12 +135,15 @@ The namespace migration is a breaking change: all `org.apache.kafka.*` imports b
 
 When Kafka releases a new version:
 
-1. Bump `kafka-clients` in `kroxylicious/kafka-patches`.
-2. The build reshades the new `kafka-clients` jar - all classes are relocated automatically.
-3. Run fidelity tests. If they pass, the new version is wire-compatible. If they fail, the failure identifies exactly which class changed behaviour.
-4. If any classes were relocated in the new release, add stability rules to the shading configuration to keep the Kroxylicious namespace unchanged.
-5. Update `EXPECTED_SPEC_COUNT` if the spec count changed.
-6. Publish the new artifact and bump its version in the Kroxylicious repo.
+1. Bump `kafka-clients` in the POM.
+2. Re-run the generator - any new specs, new fields, or new versions are picked up automatically in the generated `*Data` classes.
+3. Run `japicmp` - any upstream changes to the non-generated source-copied classes that differ from our in-repo copies are reported.
+4. Run fidelity tests - wire compatibility is verified.
+5. Review the `japicmp` report and decide which upstream changes to absorb into the in-repo source copies.
+6. Update `EXPECTED_SPEC_COUNT` if the spec count changed.
+7. Publish updated artifacts and bump their versions in the Kroxylicious repo.
+
+The key distinction from a naive fork: we are not obligated to track every upstream change. As long as wire compatibility holds (proven by fidelity tests), we can defer or skip upstream changes to the non-generated classes. The `japicmp` report makes the divergence visible and auditable, but the decision to absorb is deliberate.
 
 
 ## Affected projects
@@ -160,11 +156,11 @@ All modules that directly reference `org.apache.kafka.*` classes require import 
 
 Modules requiring import updates only: `kroxylicious-filters`, `kroxylicious-filter-test-support`, `kroxylicious-integration-test-support`.
 
-The shaded artifact published from `kroxylicious/kafka-patches` is consumed as a regular Maven dependency in the affected modules. `kroxylicious-docs` requires a migration guide.
+New module(s) in the Kroxylicious repo house the copied `MessageGenerator` source and the generated `*Data` classes alongside the copied non-generated classes. `kroxylicious-docs` requires a migration guide.
 
 ## Compatibility
 
-This is a breaking import change for filter developers - all `org.apache.kafka.*` references in filter code must be updated to `io.kroxylicious.kafka.*`. The wire protocol is unchanged; Kroxylicious continues to interoperate with all Kafka clusters it currently supports, and correctness is proven by the verification harness. `kafka-clients` becomes a dependency of `kroxylicious/kafka-patches` (for building and testing the shaded artifact) and is removed as a compile/runtime dependency of the core.
+This is a breaking import change for filter developers - all `org.apache.kafka.*` references in filter code must be updated to `io.kroxylicious.kafka.*`. The wire protocol is unchanged; Kroxylicious continues to interoperate with all Kafka clusters it currently supports, and correctness is proven by the verification harness. `kafka-clients` becomes a build-time-only dependency (for the generator to read IDL specs from, and for fidelity tests to compare against) and is removed as a compile/runtime dependency of the core.
 
 ## Rejected alternatives
 
@@ -184,14 +180,16 @@ Wrapping each Kafka class with a Kroxylicious-owned adapter that delegates metho
 
 Automatically generating wrapper classes using reflection over the Kafka originals. This has the same nesting problem as adapters, plus additional fragility: reflection cannot capture generic type parameters, default values, or version-conditional logic. Rejected as too fragile and too complex.
 
-### Pure shading without patches
+### Shade-first, own incrementally
 
-Using the Maven Shade Plugin alone to relocate `kafka-clients` packages, without retaining any ability to modify `MessageGenerator`. This handles the initial namespace migration cleanly and is invisible to file moves in Kafka's source tree. However, it provides no access to `MessageGenerator` and therefore cannot support generator-level enhancements: `aliases`, Javadoc from IDL `about` strings, and type-safe request-response pairing all require modifying the generator and regenerating from source. The proposed approach uses shading for namespace relocation but first applies patches from `kroxylicious/kafka-patches` for when enhancements are needed.
+Shade `kafka-clients` in-tree under `io.kroxylicious.kafka.*` as the primary delivery mechanism, deferring the source copy of the generator until generator enhancements are needed. This gives the cheapest possible first step - namespace ownership with almost no source to maintain - and automatic absorption of upstream changes on each Kafka bump.
 
-### Pure patch-based approach without shading (previous iteration)
+However, it means carrying a bytecode transformation as the project's foundation until the shaded classes are eventually replaced with Kroxylicious-native implementations. The step of copying in the generator (when enhancements are needed) is the same work as the proposed approach's first step - deferred, not avoided. The proposed approach front-loads that work for the benefit of uniform source ownership from the start.
 
-Cloning `apache/kafka` at a pinned tag and applying source-level patches to relocate classes before building and publishing. This was the previous iteration of this proposal. It was superseded because changing a Java file's `package` statement requires the file to live in a directory matching its new package for the compiler - meaning every package patch implicitly requires a file move too. This makes the approach a transformation pipeline rather than simple patches, with complexity that shading handles automatically at the bytecode level.
+### Patch-based approach against upstream Kafka source
 
-### Fork the `apache/kafka` repository into the Kroxylicious GitHub org
+Cloning `apache/kafka` at a pinned tag and applying source-level patches to relocate classes before building and publishing. This was an earlier iteration of this proposal. It was superseded because changing a Java file's `package` statement requires the file to live in a directory matching its new package for the compiler - meaning every package patch implicitly requires a file move too. This makes the approach a transformation pipeline rather than simple patches. Copying the source directly into the Kroxylicious repo is simpler and gives the same result without the indirection of a patch queue.
 
-Maintaining a `kroxylicious/kafka` fork with Kroxylicious-specific commits on top of upstream. This gives a standard Git workflow (edit files, commit, push) and IDE support, and Git's merge/rebase machinery handles context drift more gracefully than patches do. However, it adds a repository to the org that must be kept in sync, the fork's diff from upstream is implicit rather than inspectable, and there is a risk of the fork accumulating unintentional drift. Storing generator patches in `kroxylicious/kafka-patches` achieves the same generator-modification capability with less overhead.
+### Maintaining a separate GitHub repo for the copied source
+
+Keeping the copied `MessageGenerator` and non-generated classes in a separate Kroxylicious GitHub org repo (e.g. `kroxylicious/kafka-protocol`) rather than in the main Kroxylicious repo. This adds a repository to manage - its own CI, versioning, publishing pipeline, and contributor onboarding - for limited benefit. Keeping everything in the main repo means contributors work in a single place, the copied source is visible alongside the code that depends on it, and there is no cross-repo coordination overhead when generator changes affect filter API code.
