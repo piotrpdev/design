@@ -37,7 +37,7 @@ Every type that appears in Kroxylicious's public API should live in a Kroxylicio
 
 ### Approach: own the source from the start
 
-Kafka's `MessageGenerator` (~35 files in `generator/src/main/java/org/apache/kafka/message/`) is copied into the Kroxylicious repo as a new module. It is invoked during the build against the upstream JSON IDL spec files (bundled inside `kafka-clients`) to produce `*Data` source files under the Kroxylicious namespace (`io.kroxylicious.kafka.*`). The non-generated classes - protocol infrastructure, record classes, and scattered `common.*` types - are similarly copied into the Kroxylicious repo as source under the same namespace, retaining their original Apache Software Foundation copyright headers.
+Kafka's `MessageGenerator` (~35 files in `generator/src/main/java/org/apache/kafka/message/`) is copied into the Kroxylicious repo as a new module (`kroxylicious-kafka-message-generator`). It is invoked during the build against the upstream JSON IDL spec files (bundled inside `kafka-clients`) to produce `*Data` source files under the Kroxylicious namespace (`io.kroxylicious.kafka.*`). The non-generated classes - protocol infrastructure, record classes, and scattered `common.*` types - are similarly copied into the Kroxylicious repo as source under the same namespace, retaining their original Apache Software Foundation copyright headers. All of these classes live in a new `kroxylicious-kafka-common` module, mirroring the structure of Kafka's own `org.apache.kafka.common` package.
 
 This gives full source ownership from day one. Every upstream change is a deliberate choice - review it, absorb it, or skip it. Generator enhancements (type-safe request-response pairing, Javadoc from IDL, `aliases`) are first-class commits to the in-repo generator, not patches layered on top. And when the time comes to replace buffer/record classes with Netty-native implementations, there is no bytecode transformation to unwind - we already own the source.
 
@@ -45,14 +45,14 @@ The `kroxylicious-krpc-plugin` currently depends on `kafka-clients` solely for `
 
 ### What gets copied and generated
 
-| Component                                  | Source                                    | Approach                                               |
-|--------------------------------------------|-------------------------------------------|--------------------------------------------------------|
-| `MessageGenerator` + friends (~35 files)   | `kafka/generator/src/`                    | Copied into Kroxylicious repo as a new module          |
-| `*Data` classes (~198)                     | IDL specs + copied `MessageGenerator`     | Generated during build under `io.kroxylicious.kafka.*` |
-| Protocol infrastructure (~16 classes)      | `kafka-clients` `common.protocol.*`       | Copied as source under `io.kroxylicious.kafka.*`       |
-| Record classes (~35 classes)               | `kafka-clients` `common.record.*`         | Copied as source under `io.kroxylicious.kafka.*`       |
-| `ApiKeys`                                  | `kafka-clients` `common.protocol.ApiKeys` | Generated from IDL specs, or copied as source          |
-| `Uuid`, `UnsupportedVersionException`, etc.| `kafka-clients` `common.*`               | Copied as source under `io.kroxylicious.kafka.*`       |
+| Component                                   | Source                                    | Approach                                               |
+|---------------------------------------------|-------------------------------------------|--------------------------------------------------------|
+| `MessageGenerator` + friends (~35 files)    | `kafka/generator/src/`                    | Copied into `kroxylicious-kafka-message-generator`     |
+| `*Data` classes (~198)                      | IDL specs + copied `MessageGenerator`     | Generated into `kroxylicious-kafka-common`             |
+| Protocol infrastructure (~16 classes)       | `kafka-clients` `common.protocol.*`       | Copied into `kroxylicious-kafka-common`                |
+| Record classes (~35 classes)                | `kafka-clients` `common.record.*`         | Copied into `kroxylicious-kafka-common`                |
+| `ApiKeys`                                   | `kafka-clients` `common.protocol.ApiKeys` | Generated from IDL specs, or copied as source          |
+| `Uuid`, `UnsupportedVersionException`, etc. | `kafka-clients` `common.*`                | Copied into `kroxylicious-kafka-common`                |
 
 `ByteBufAccessor` is Kroxylicious-owned and is updated separately: it is changed to implement the new `Readable`/`Writable` interfaces from the Kroxylicious namespace rather than Kafka's.
 
@@ -156,7 +156,7 @@ All modules that directly reference `org.apache.kafka.*` classes require import 
 
 Modules requiring import updates only: `kroxylicious-filters`, `kroxylicious-filter-test-support`, `kroxylicious-integration-test-support`.
 
-New module(s) in the Kroxylicious repo house the copied `MessageGenerator` source and the generated `*Data` classes alongside the copied non-generated classes. `kroxylicious-docs` requires a migration guide.
+Two new modules are added: `kroxylicious-kafka-message-generator` houses the copied `MessageGenerator` source, and `kroxylicious-kafka-common` houses the generated `*Data` classes and all copied non-generated classes. `kroxylicious-docs` requires a migration guide.
 
 ## Compatibility
 
