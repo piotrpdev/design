@@ -150,6 +150,39 @@ When Kafka releases a new version:
 The key distinction from a naive fork: we are not obligated to track every upstream change. As long as wire compatibility holds (proven by fidelity tests), we can defer or skip upstream changes to the non-generated classes. The `japicmp` report makes the divergence visible and auditable, but the decision to absorb is deliberate.
 
 
+## Implementation plan
+
+The work is split into sequential phases. Each phase produces a reviewable unit of work and leaves the codebase in a buildable, testable state.
+
+**Phase 1 - Scaffold the new modules**
+- Create `kroxylicious-kafka-message-generator` and copy the `MessageGenerator` source (~35 files) into it
+- Create `kroxylicious-kafka-common`, copy the non-generated classes (`protocol.*`, `record.*`, scattered `common.*` types) into it, and configure `exec-maven-plugin` to invoke the generator and produce `*Data` classes into the module during `generate-sources`
+- Suppress Checkstyle and ErrorProne for copied file locations
+
+**Phase 2 - Build the verification harness**
+- Create `kroxylicious-kafka-common-tests` with the wire-level fidelity tests (parameterised across all specs and versions, randomised field-value tests, compile-time spec count guard)
+- Configure the `japicmp` comparison (throwaway shaded reference artifact) and wire it into CI
+- Add the proactive early-warning GitHub workflow that runs on Dependabot PRs that bump `kafka-clients`
+
+Phases 1 and 2 can proceed in parallel. Phase 3 must not begin until the fidelity tests in Phase 2 are green.
+
+**Phase 3 - Developer tooling and announcement**
+- Write the migration guide documenting the package mapping
+- Write and test the automated migration script
+- Announce the deprecation in the CHANGELOG under "Changes, deprecations and removals" - this must go out at least three minor releases before the breaking change lands, per the project deprecation policy
+- Update `kroxylicious-docs`
+
+**Phase 4 - Migrate the Kroxylicious core**
+- Update `kroxylicious-api`: `ByteBufAccessor` bridge updated to implement the new `Readable`/`Writable` interfaces; filter interface signatures updated to reference `io.kroxylicious.kafka.*`
+- Update `kroxylicious-runtime`: codec and Kafka exception mapper updated for the new Java package
+- Update `kroxylicious-krpc-plugin`: FreeMarker templates updated to reference the new Java package; `ApiKeys` dependency replaced by `kroxylicious-kafka-common`
+
+**Phase 5 - Migrate filters and test support**
+- Import updates across `kroxylicious-filters`, `kroxylicious-filter-test-support`, `kroxylicious-integration-test-support`
+
+**Phase 6 - Type-safe request-response pairing (decision gate)**
+- Decide whether to include type-safe pairing before the first stable publication of the new namespace. If yes, implement in the generator before cutting a release. This must not be deferred past the first stable release.
+
 ## Affected projects
 
 All modules that directly reference `org.apache.kafka.*` classes require import updates. The modules with structural changes beyond import updates are:
